@@ -1,0 +1,28 @@
+# Terraform checks on every change, using the GonService reusable workflow.
+# The module declares a provider alias (aws.us_east_1), so it is validated through the
+# example root configuration, which passes both providers to it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+  example:
+    uses: GonService/github-actions-templates/.github/workflows/terraform.yml@v1
+    with:
+      working-directory: examples/complete

@@ -1,0 +1,53 @@
+# Publishes site/ to S3 and invalidates CloudFront. Uses the OIDC role created by the module
+# (output deploy_role_arn) — no AWS keys stored in GitHub.
+# Repository variables: AWS_REGION, SITE_BUCKET, CLOUDFRONT_DISTRIBUTION_ID. Secret: AWS_ROLE_ARN.
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.SITE_BUCKET != ''
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload HTML (short cache)
+        env:
+          BUCKET: ${{ vars.SITE_BUCKET }}
+        run: |
+          aws s3 sync site/ "s3://$BUCKET/" --delete --exclude "*" --include "*.html" \
+            --cache-control "public, max-age=60, must-revalidate"
+
+      - name: Upload assets (long cache)
+        env:
+          BUCKET: ${{ vars.SITE_BUCKET }}
+        run: |
+          aws s3 sync site/ "s3://$BUCKET/" --delete --exclude "*.html" \
+            --cache-control "public, max-age=31536000, immutable"
+
+      - name: Invalidate CloudFront
+        env:
+          DISTRIBUTION: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          id=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" --paths "/*" --query Invalidation.Id --output text)
+          aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION" --id "$id"
+          echo "Invalidation $id completed" >> "$GITHUB_STEP_SUMMARY"
